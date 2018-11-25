@@ -1,7 +1,7 @@
 #-*- coding: utf-8 -*-
-import glob, gzip, os, cPickle as pickle
+import glob, gzip, os, pickle as pickle
 
-from util import addHook, cfg1, wrap, mw
+from .util import addHook, cfg1, wrap, mw
 from aqt import toolbar
 
 def getStatsPath(): return cfg1('path_stats')
@@ -25,7 +25,7 @@ def saveStats( d ):
 def updateStats( knownDb=None ):
     mw.progress.start( label='Updating stats', immediate=True )
 
-    from morphemes import MorphDb
+    from .morphemes import MorphDb
     d = {}
 
     # Load known.db and get total morphemes known
@@ -45,14 +45,14 @@ def updateStats( knownDb=None ):
         # track total unique morphemes + when weighted by frequency
         # NOTE: a morpheme may occur multiple times within the same sentence, but this frequency is wrt note fields
         numUniqueReq, numUniqueKnown, numFreqReq, numFreqKnown = 0, 0, 0, 0
-        for m in gdb.db.iterkeys():
+        for m in gdb.db.keys():
             freq = gdb.db.frequency(m)
             numUniqueReq += 1
             numFreqReq   += freq
             if m in knownDb.db:
                 numUniqueKnown += 1
                 numFreqKnown   += freq
-        
+
         d['goals'][ name ] = { 'total':numUniqueReq, 'known':numUniqueKnown, 'freqTotal':numFreqReq, 'freqKnown':numFreqKnown }
 
     saveStats( d )
@@ -78,6 +78,8 @@ def my_centerLinks( self, _old ):
         ["decks", _("Decks"), _("Shortcut key: %s") % "D"],
         ["add", _("Add"), _("Shortcut key: %s") % "A"],
         ["browse", _("Browse"), _("Shortcut key: %s") % "B"],
+        ["stats", _("Stats"), _("Shortcut key: %s") % "Shift+S"],
+        ["sync", _("Sync"), _("Shortcut key: %s") % "Y"],
         ["morph", _(name), _(details)],
     ]
     return self._linkHTML( links )
