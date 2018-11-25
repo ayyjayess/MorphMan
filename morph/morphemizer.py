@@ -197,28 +197,31 @@ class SpacyMorphemizer(Morphemizer):
     def __init__(self):
         self.spacy = None
         self.n = 0
+        import spacy
+        self.nlp = spacy.load('de_core_news_sm', disable=['parser', 'ner'])
 
     def getMorphemesFromExpr(self, e): # Str -> [Morpheme]
+        print("This is slow! Use the bulk method", e)
         self.n += 1
         if self.n % 100 == 0:
             print(self.n)
         print("e", e)
-        if (e == "" or
-                e == "ankiflag"): # TODO what is this?
-            return [] # Morpheme(ankiflag, ankiflag, 'UNKNOWN', 'UNKNOWN', ankiflag)]
-        if not self.spacy:
-            self.spacy = subprocess.Popen(['/home/andrew/.local/share/Anki2/repos/MorphMan/morph/spacyLink.py'],
-                                          stdout=subprocess.PIPE,
-                                          stdin=subprocess.PIPE)
-        p = self.spacy
-        expr = e.encode('utf-8')
-        p.stdin.write( expr + '\n' )
-        p.stdin.flush()
-        line = p.stdout.readline().rstrip( '\r\n' ).decode('utf-8')
 
-        # wordList = re.findall(r"\w+", e, re.UNICODE)
-        # return [Morpheme(word, word, 'UNKNOWN', 'UNKNOWN', word) for word in wordList]
-        return [(lambda t: Morpheme(t[0], t[1], t[2], t[3], t[4]))(word.split(' ')) for word in line.split("\t")]
+        doc = self.nlp(e)
+        # "base     infl    pos     subPos    read"
+        return [Morpheme(w.lemma_.lower(), w.orth_.lower(), w.pos_, w.tag_, w.orth_.lower()) for w in doc if w.pos_ != 'PUNCT']
+    
+    def getMorphemesFromExprBulk(self, ex): # Str -> [Morpheme]
+        docs = []
+        for doc in self.nlp.pipe(ex, batch_size=1000,
+                n_threads=3):
+            docs.append(doc)
+            if len(docs) % 1000 == 0:
+                print(len(docs))
+        del doc
+        return [
+            [Morpheme(w.lemma_.lower(), w.orth_.lower(), w.pos_, w.tag_, w.orth_.lower()) for w in doc if w.pos_ != 'PUNCT']
+            for doc in docs]
 
     def getDescription(self):
         return 'Language with Spacys'

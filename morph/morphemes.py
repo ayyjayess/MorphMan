@@ -60,7 +60,7 @@ class MorphCache():
     def __init__(self):
         from aqt import mw # this script isn't imported until profile is loaded
         import os.path
-        self.path = os.path.join( mw.pm.profileFolder(), 'dbs', 'morpth_cache.db' )
+        self.path = os.path.join( mw.pm.profileFolder(), 'dbs', 'morph_cache.db' )
         if os.path.isfile(self.path):
             import pickle
             with open(self.path, 'rb') as fp:
@@ -70,16 +70,25 @@ class MorphCache():
     def save(self):
         import pickle
         print("saving ", len(self.cache) )
+        if not os.path.exists(os.path.dirname(self.path)):
+            try:
+                os.makedirs(os.path.dirname(self.path))
+            except OSError as exc: # Guard against race condition
+                if exc.errno != errno.EEXIST:
+                    raise
         with open(self.path, 'wb') as fp:
             pickle.dump(self.cache, fp)
 
-morphCacheDB = None
+_morphCacheDB = None
+def getMorphCacheDB():
+    global _morphCacheDB
+    if not _morphCacheDB:
+        _morphCacheDB = MorphCache()
+    return _morphCacheDB
+    
 n = 0
 def getMorphemes(morphemizer, expression, note_tags=None):
-    global morphCacheDB
-    if not morphCacheDB:
-        morphCacheDB = MorphCache()
-    
+    morphCacheDB = getMorphCacheDB()
     morph_key = (morphemizer.getDescription(), expression)
     if morph_key in morphCacheDB.cache:
         return morphCacheDB.cache[morph_key]
@@ -105,10 +114,10 @@ def getMorphemes(morphemizer, expression, note_tags=None):
             b_morphs = [Morpheme(mstr, mstr, 'UNKNOWN', 'UNKNOWN', mstr) for mstr in morphemes]
             c_morphs = getMorphemes(morphemizer, splitted_expression[1], note_tags)
 
-            return a_morphs + b_morphs + c_morphs
-
-
-    ms = morphemizer.getMorphemesFromExpr(expression)
+            ms = a_morphs + b_morphs + c_morphs
+            break
+    else:
+        ms = morphemizer.getMorphemesFromExpr(expression)
     morphCacheDB.cache[morph_key] = ms
     global n
     n += 1

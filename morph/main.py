@@ -2,8 +2,8 @@
 import time
 
 from anki.utils import splitFields, joinFields, stripHTML, intTime, fieldChecksum
-from .morphemes import MorphDb, AnkiDeck, getMorphemes
-from .morphemizer import getMorphemizerByName
+from .morphemes import MorphDb, AnkiDeck, getMorphemes, getMorphCacheDB
+from .morphemizer import getAllMorphemizers, getMorphemizerByName
 from . import stats
 from .util import printf, mw, cfg, cfg1, partial, errorMsg, infoMsg, jcfg, jcfg2, getFilter
 from . import util
@@ -61,6 +61,51 @@ def mkAllDb( allDb=None ):
     locDb   = allDb.locDb( recalc=False )   # fidDb() already forces locDb recalc
 
     mw.progress.update( label='Generating all.db data' )
+    bulkMorphemizers = [ m.__class__.__name__ for m in getAllMorphemizers() if getattr(m, 'getMorphemesFromExprBulk', None) != None]
+    print("bulkMorphemizers: ", bulkMorphemizers)
+    morphCacheDB = getMorphCacheDB()
+    for morphemizer_name in bulkMorphemizers:
+        fields = []
+        morphemizer = getMorphemizerByName(morphemizer_name)
+        for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes' ) ):
+            if i % 500 == 0:    mw.progress.update( value=i )
+            note = mw.col.getNote(nid)
+            notecfg = getFilter(note)
+            if notecfg is None: continue
+            if morphemizer_name != notecfg['Morphemizer']:
+                continue
+            for fieldName in notecfg['Fields']:
+                try: # if doesn't have field, continue
+                    #fieldValue = normalizeFieldValue( getField( fieldName, flds, mid ) )
+                    fieldValue = extractFieldData( fieldName, flds, mid )
+                except KeyError: continue
+                except TypeError:
+                    mname = mw.col.models.get( mid )[ 'name' ]
+                    errorMsg( 'Failed to get field "{field}" from a note of model "{model}". Please fix your config.py file to match your collection appropriately and ignore the following error.'.format( model=mname, field=fieldName ) )
+                    raise
+                    
+                fields.append(fieldValue)
+        fields = [e for e in fields if (morphemizer.getDescription(), e) not in morphCacheDB.cache]
+        # fields = fields[:100]
+        def chunks(l, n):
+            """Yield successive n-sized chunks from l."""
+            for i in range(0, len(l), n):
+                yield l[i:i + n]
+        # import IPython
+        # IPython.embed()
+        for i, chunk in enumerate(chunks(fields, 10000)):
+            print("chunk", i)
+            print("new cache", len(morphCacheDB.cache))
+            morphemes = morphemizer.getMorphemesFromExprBulk(chunk)
+            new_cache = {(morphemizer.getDescription(), e): ms for (e,ms) in zip(chunk, morphemes)}
+            # print("old cache", len(morphCacheDB.cache))
+            # print("add new_cache", len(new_cache))
+            # print("new_cache", new_cache)
+            morphCacheDB.cache.update(new_cache)
+            morphCacheDB.save()
+        
+    print("Done bulking")
+        
     for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes' ) ):
         if i % 500 == 0:    mw.progress.update( value=i )
         C = partial( cfg, mid, None )
@@ -162,7 +207,7 @@ def updateNotes( allDb ):
         matureDb.save( cfg1('path_mature') )
         if morphCacheDB:
             morphCacheDB.save()
-
+    
     mw.progress.update( label='Updating notes' )
     for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes' ) ):
         if i % 500 == 0:    mw.progress.update( value=i )

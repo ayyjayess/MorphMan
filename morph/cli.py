@@ -8,8 +8,13 @@ import os.path
 import signal
 import sys
 
+<<<<<<< HEAD
+from morph.morphemes import MorphDb, Morpheme
+from morph.morphemizer import SpaceMorphemizer, MecabMorphemizer, CjkCharMorphemizer
+=======
 from .morphemes import MorphDb
 from .morphemizer import SpaceMorphemizer, MecabMorphemizer, CjkCharMorphemizer
+>>>>>>> 21/master
 import morph
 
 
@@ -106,12 +111,17 @@ def cmd_dump(args):
     db_name = args.name
     inc_freq = bool(args.freq)
 
+<<<<<<< HEAD
+    db = load_db(db_name)
+    for m in db.db.keys():
+=======
     path = db_path(db_name)
     if not os.access(path, os.R_OK):
         die('can\'t read db file: %s' % (path,))
     db = MorphDb(path)
 
     for m in list(db.db.keys()):
+>>>>>>> 21/master
         m_formatted = m.show().encode('utf-8')
         if inc_freq:
             print('%d\t%s' % (db.frequency(m), m_formatted))
