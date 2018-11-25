@@ -2,13 +2,15 @@ from __future__ import absolute_import
 
 import argparse
 import codecs
-from collections import Counter
+from collections import Counter, defaultdict
 import glob
+import itertools
+import math
 import os.path
 import signal
 import sys
 
-from morph.morphemes import MorphDb
+from morph.morphemes import MorphDb, Morpheme
 from morph.morphemizer import SpaceMorphemizer, MecabMorphemizer, CjkCharMorphemizer
 import morph
 
@@ -78,6 +80,23 @@ def db_path(db_name):
     return os.path.join(profile_path(), 'dbs', db_name + '.db')
 
 
+def load_db(db_name, allow_missing=False):
+    path = db_path(db_name)
+    if not allow_missing and not os.access(path, os.R_OK):
+        die('can\'t read db file: %s' % (path,))
+    return MorphDb(path, ignoreErrors=allow_missing)
+
+
+def parse_morpheme(morpheme_str):
+    fields = morpheme_str.split('\t')
+    if len(fields) != 4:
+        die('bad morpheme (should be 4 tab-separated fields, MorphMan-style): %s'
+            % (morpheme_str,))
+    # Only 4 fields show up in equality, hash, or show, but the constructor
+    # takes an extra one.  That's the second argument; duplicate the first.
+    return Morpheme(fields[0], *fields)
+
+
 MIZERS = {
     'space': SpaceMorphemizer(),
     'mecab': MecabMorphemizer(),
@@ -89,11 +108,7 @@ def cmd_dump(args):
     db_name = args.name
     inc_freq = bool(args.freq)
 
-    path = db_path(db_name)
-    if not os.access(path, os.R_OK):
-        die('can\'t read db file: %s' % (path,))
-    db = MorphDb(path)
-
+    db = load_db(db_name)
     for m in db.db.keys():
         m_formatted = m.show().encode('utf-8')
         if inc_freq:
@@ -114,6 +129,109 @@ def cmd_count(args):
 
     for m, c in freqs.most_common():
         print '%d\t%s' % (c, m.show().encode('utf-8'))
+
+
+def cmd_next(args):
+    notes_path = args.notes
+    prio_path = args.prio
+    mizer = MIZERS[args.mizer]
+
+    known = load_db('known')
+
+    candidates = defaultdict(list)
+    with codecs.open(notes_path, 'r', 'utf-8') as f:
+        for line in f.readlines():
+            note = line.strip()
+            text = note.split('\t', 1)[0]
+            unknowns = [m for m in mizer.getMorphemesFromExpr(text)
+                        if m not in known.db]
+            if len(unknowns) == 1:
+                candidates[unknowns[0].show()].append(note)
+
+    with codecs.open(prio_path, 'r', 'utf-8') as f:
+        for line in f.readlines():
+            freq, m = line.strip().split('\t', 1)
+            m_cite = m.split('\t', 1)[0]
+            for cand in candidates[m]:
+                print (u'%s\t%s\t%s' % (freq, m_cite, cand)).encode('utf-8')
+
+
+def cmd_grep(args):
+    pattern_string = args.pattern
+    files = args.files
+    max_count = args.max_count
+    mizer = MIZERS[args.mizer]
+
+    pattern = parse_morpheme(pattern_string.decode('utf-8'))
+
+    count = 0
+    for path in files:
+        with codecs.open(path, 'r', 'utf-8') as f:
+            for line in f:
+                ms = mizer.getMorphemesFromExpr(line)
+                if pattern in ms:
+                    sys.stdout.write(line.encode('utf-8'))
+                    count += 1
+                    if max_count is not None and count >= max_count:
+                        return
+
+
+def clear_locs(db, pred):
+    '''Remove from `db` locations that match `pred`, and morphemes left without locations.'''
+    empty_ms = []
+    for m, locs in db.db.iteritems():
+        locs.difference_update([loc for loc in locs if pred(loc)])
+        if not locs:
+            empty_ms.append(m)
+    for m in empty_ms:
+        del db.db[m]
+
+
+def cmd_sync_known(args):
+    filenames = args.input or ['known.txt']
+    should_merge = args.merge
+
+    external_db = load_db('external', allow_missing=True)
+    if not should_merge:
+        clear_locs(external_db, lambda loc: isinstance(loc, morph.morphemes.Nowhere))
+
+    db_dir = os.path.join(profile_path(), 'dbs')
+    loc = morph.morphemes.Nowhere(maturity=30)  # arbitrary but > maturity threshold
+    for filename in filenames:
+        with codecs.open(os.path.join(db_dir, filename), 'r', 'utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                m = parse_morpheme(line)
+                external_db.addMLs([(m, loc)])
+
+    external_db.save(db_path('external'))
+
+
+def cmd_sync_freq(args):
+    corpus_name = args.name
+    freq_path = args.freqfile
+    threshold = args.threshold
+    scale = args.weight
+
+    data = []
+    with codecs.open(freq_path, 'r', 'utf-8') as f:
+        for line in f:
+            ctext, mtext = line.strip().split('\t', 1)
+            c = int(ctext)
+            weight = int(math.ceil(scale * c))
+            if weight < threshold:
+                continue
+            m = parse_morpheme(mtext)
+            data.append((weight, m))
+
+    external_db = load_db('external', allow_missing=True)
+    clear_locs(external_db, lambda loc: (isinstance(loc, morph.morphemes.Corpus)
+                                         and loc.name == corpus_name))
+    external_db.addMLs([(m, morph.morphemes.Corpus(corpus_name, weight))
+                        for weight, m in data])
+    external_db.save(db_path('external'))
 
 
 def fix_sigpipe():
@@ -139,14 +257,68 @@ def main():
     p_dump.add_argument('name', metavar='NAME', help='database to dump (all, known, ...)')
     p_dump.add_argument('--freq', action='store_true', help='include frequency as known to MorphMan')
 
+    def add_mizer(parser):
+        parser.add_argument('--mizer', default='mecab', choices=MIZERS.keys(),
+                            metavar='NAME',
+                            help='how to split morphemes (%s) (default %s)'
+                                 % (', '.join(MIZERS.keys()), 'mecab'))
+
     p_count = subparsers.add_parser('count', help='count morphemes in a corpus',
                         description='Count all morphemes in the given files and emit a frequency table.')
     p_count.set_defaults(action=cmd_count)
     p_count.add_argument('files', nargs='*', metavar='FILE', help='input files of text to morphemize')
-    p_count.add_argument('--mizer', default='mecab', choices=MIZERS.keys(),
-                         metavar='NAME',
-                         help='how to split morphemes (%s) (default %s)'
-                              % (', '.join(MIZERS.keys()), 'mecab'))
+    add_mizer(p_count)
+
+    p_next = subparsers.add_parser('next', help='find next notes to study from a corpus')
+    p_next.set_defaults(action=cmd_next)
+    p_next.add_argument('prio', metavar='FREQS', help='file of morphemes to study, with frequencies')
+    p_next.add_argument('notes', metavar='NOTES', help='file of newline-terminated notes, each tab-separated fields starting with the text')
+    add_mizer(p_next)
+
+    p_grep = subparsers.add_parser('grep', help='find given morpheme in a corpus', description='\
+Search the given corpus for the given morpheme and print matches.')
+    p_grep.set_defaults(action=cmd_grep)
+    p_grep.add_argument('pattern', metavar='MORPHEME', help='morpheme, in MorphMan tab-separated form')
+    p_grep.add_argument('files', nargs='*', metavar='FILE', help='files of text to search')
+    p_grep.add_argument('-m', '--max-count', type=int, metavar='NUM', help='max matches to print')
+    add_mizer(p_grep)
+
+    p_sync_known = subparsers.add_parser('sync-known', help='sync known-morphemes file to external.db',
+                                         description='''\
+Read a text file of known morphemes and sync that information to external.db.
+
+The morphemes are recorded with the `Nowhere` location type; by default
+any existing such morphemes not present in the given file are removed.
+
+After running this command, run the "MorphMan Recalc" command inside Anki
+to reflect the results in all.db, known.db, and card ordering.
+''')
+    p_sync_known.set_defaults(action=cmd_sync_known)
+    p_sync_known.add_argument('-f', '--input', action='append',
+                              metavar='FILE', help='input file, relative to `dbs` dir (default: known.txt)')
+    p_sync_known.add_argument('--merge', action='store_true',
+                              help='add to existing known morphemes rather than replacing them')
+
+    p_sync_freq = subparsers.add_parser('sync-freq', help='sync frequencies from a corpus into external.db',
+                                        description='''\
+Read a text file of morpheme frequencies and sync that information into external.db.
+
+The morphemes are recorded with the `Corpus` location type and the given
+corpus NAME.  Any existing `Corpus` locations with that corpus name are
+removed or updated.
+
+After running this command, run the "MorphMan Recalc" command inside Anki
+to reflect the results in all.db, known.db, and card ordering.
+''')
+    p_sync_freq.set_defaults(action=cmd_sync_freq)
+    p_sync_freq.add_argument('name', metavar='NAME',
+                             help='name to record the corpus under')
+    p_sync_freq.add_argument('freqfile', metavar='FILE',
+                             help='file of frequencies (in the format of `mm count` output)')
+    p_sync_freq.add_argument('--weight', type=float, default=1, metavar='NUM',
+                             help='scale factor to multiply given frequencies by')
+    p_sync_freq.add_argument('--threshold', type=int, default=10, metavar='N',
+                             help='minimum (weighted) frequency to include (default: 10)')
 
     args = parser.parse_args()
     global CLI_PROFILE_PATH
