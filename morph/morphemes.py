@@ -55,8 +55,35 @@ class Morpheme:
 def ms2str( ms ): # [Morpheme] -> Str
     return u'\n'.join( m.show() for m in ms )
 
+class MorphCache():
+    # shared
+    def __init__(self):
+        from aqt import mw # this script isn't imported until profile is loaded
+        import os.path
+        self.path = os.path.join( mw.pm.profileFolder(), 'dbs', 'morpth_cache.db' )
+        if os.path.isfile(self.path):
+            import pickle
+            with open(self.path, 'rb') as fp:
+                self.cache = pickle.load(fp)
+        else:
+            self.cache = {}
+    def save(self):
+        import pickle
+        print("saving ", len(self.cache) )
+        with open(self.path, 'wb') as fp:
+            pickle.dump(self.cache, fp)
 
+morphCacheDB = None
+n = 0
 def getMorphemes(morphemizer, expression, note_tags=None):
+    global morphCacheDB
+    if not morphCacheDB:
+        morphCacheDB = MorphCache()
+    
+    morph_key = (morphemizer.getDescription(), expression)
+    if morph_key in morphCacheDB.cache:
+        return morphCacheDB.cache[morph_key]
+
     # go through all replacement rules and search if a rule (which dictates a string to morpheme conversion) can be applied
     replace_rules = jcfg('ReplaceRules')
     if not note_tags is None and not replace_rules is None:
@@ -82,6 +109,11 @@ def getMorphemes(morphemizer, expression, note_tags=None):
 
 
     ms = morphemizer.getMorphemesFromExpr(expression)
+    morphCacheDB.cache[morph_key] = ms
+    global n
+    n += 1
+    if n % 100 == 0:
+        morphCacheDB.save()
     return ms
 
 

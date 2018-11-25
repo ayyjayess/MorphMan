@@ -2,7 +2,7 @@
 import time
 
 from anki.utils import splitFields, joinFields, stripHTML, intTime, fieldChecksum
-from morphemes import MorphDb, AnkiDeck, getMorphemes
+from morphemes import MorphDb, AnkiDeck, getMorphemes, morphCacheDB
 from morphemizer import getMorphemizerByName
 import stats
 from util import printf, mw, cfg, cfg1, partial, errorMsg, infoMsg, jcfg, jcfg2, getFilter
@@ -159,6 +159,8 @@ def updateNotes( allDb ):
         seenDb.save( cfg1('path_seen') )
         knownDb.save( cfg1('path_known') )
         matureDb.save( cfg1('path_mature') )
+        if morphCacheDB:
+            morphCacheDB.save()
 
     mw.progress.update( label='Updating notes' )
     for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes' ) ):

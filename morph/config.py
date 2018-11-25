@@ -45,13 +45,13 @@ default = {
         # try playing fields in this order when using batch media player
     'batch media fields': [ u'Video', u'Sound' ],
         # configure morph man index algorithm
-    'min good sentence length': 2,
+    'min good sentence length': 0,
     'max good sentence length': 8,          # +1000 MMI per morpheme outside the "good" length range
     'reinforce new vocab weight': 5.0,      # -reinforce_weight / maturity MMI per known that is not yet mature
     'verb bonus': 100,                      # -verb_bonus if at least one unknown is a verb
     'priority.db weight': 200,              # -priority_weight per unknown that exists in priority.db
         # lite update
-    'only update k+2 and below': False,     # this reduces how many notes are changed and thus sync burden by not updating notes that aren't as important
+    'only update k+2 and below': True,     # this reduces how many notes are changed and thus sync burden by not updating notes that aren't as important
 
     # only these can have deck overrides
     'next new card feature':True,   # skip cards with focusMorph that was already seen or aren't k+1
