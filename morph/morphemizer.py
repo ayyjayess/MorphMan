@@ -26,6 +26,7 @@ class Morphemizer:
 # Morphemizer Helpers
 ####################################################################################################
 
+@memoize
 def getAllMorphemizers(): # -> [Morphemizer]
     return [SpacyMorphemizer(), SpaceMorphemizer(), MecabMorphemizer(), CjkCharMorphemizer()]
 
@@ -195,33 +196,64 @@ class SpacyMorphemizer(Morphemizer):
     Morphemizer for languages that can use Spacy (English, German, Spanish, ...). 
     '''
     def __init__(self):
-        self.spacy = None
         self.n = 0
         import spacy
-        self.nlp = spacy.load('de_core_news_sm', disable=['parser', 'ner'])
+        self._nlp = None
+        
+    def get_nlp(self):
+        if not self._nlp:
+            self._nlp = spacy.load('de_core_news_sm', disable=['parser', 'ner'])
+        return self._nlp
+        
+    def spacyDocToMorphemes(self, doc):
+        # "base     infl    pos     subPos    read"
+        return [Morpheme(w.lemma_.lower(), w.orth_.lower(), w.pos_, w.tag_, w.orth_.lower()) for w in doc 
+                 if (not w.pos_ in
+                    [
+                        # http://universaldependencies.org/en/pos/index.html
 
-    def getMorphemesFromExpr(self, e): # Str -> [Morpheme]
+                        # Spacy accidently calls some nouns proper
+                        # (possibily due to German capitalization) e.g.
+                        # "Elektrotechniker". However, we're going to make the
+                        # assumption that incorrectly classed words aren't very
+                        # common and so this is not too important.
+                        # TODO in future: possibily use a compound word splitter
+                        # https://github.com/dtuggener/CharSplit on "proper"
+                        # nouns to see if their constituent words are nonproper.
+                        # 'PROPN', # proper noun
+                        # keep numbers as "zwei" is useful. We'll remove words containing actual digits next
+                        # 'NUM',   # 000, zwei, drei, vier, fünf
+                        'PUNCT', # punctuation
+                        'SYM',   # non-punctuation symbols including emojis
+                        'X',     # Foreign language etc
+                        # Spacy specific
+                        'EOL',
+                        'NO_TAG',
+                        'SPACE',
+                        ]) and all(c.isalpha() for c in w.orth_)]
+
+    def getMorphemesFromExpr(self, e):
         print("This is slow! Use the bulk method", e)
         self.n += 1
         if self.n % 100 == 0:
             print(self.n)
         print("e", e)
 
-        doc = self.nlp(e)
-        # "base     infl    pos     subPos    read"
-        return [Morpheme(w.lemma_.lower(), w.orth_.lower(), w.pos_, w.tag_, w.orth_.lower()) for w in doc if w.pos_ != 'PUNCT']
+        nlp = self.get_nlp()
+
+        doc = nlp(e)
+        return self.spacyDocToMorphemes(doc)
     
-    def getMorphemesFromExprBulk(self, ex): # Str -> [Morpheme]
+    def getMorphemesFromExprBulk(self, ex):
+        nlp = self.get_nlp()
         docs = []
-        for doc in self.nlp.pipe(ex, batch_size=1000,
+        for doc in nlp.pipe(ex, batch_size=1000,
                 n_threads=3):
             docs.append(doc)
             if len(docs) % 1000 == 0:
                 print(len(docs))
         del doc
-        return [
-            [Morpheme(w.lemma_.lower(), w.orth_.lower(), w.pos_, w.tag_, w.orth_.lower()) for w in doc if w.pos_ != 'PUNCT']
-            for doc in docs]
+        return [self.spacyDocToMorphemes(doc) for doc in docs]
 
     def getDescription(self):
         return 'Language with Spacys'

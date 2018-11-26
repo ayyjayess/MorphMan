@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import codecs, pickle as pickle, gzip, os, subprocess, re
+from .util_external import memoize
 
 # need some fallbacks if not running from anki and thus morph.util isn't available
 try:
@@ -79,12 +80,9 @@ class MorphCache():
         with open(self.path, 'wb') as fp:
             pickle.dump(self.cache, fp)
 
-_morphCacheDB = None
+@memoize
 def getMorphCacheDB():
-    global _morphCacheDB
-    if not _morphCacheDB:
-        _morphCacheDB = MorphCache()
-    return _morphCacheDB
+    return MorphCache()
     
 n = 0
 def getMorphemes(morphemizer, expression, note_tags=None):

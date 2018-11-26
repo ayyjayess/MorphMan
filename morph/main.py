@@ -86,6 +86,7 @@ def mkAllDb( allDb=None ):
                     
                 fields.append(fieldValue)
         fields = [e for e in fields if (morphemizer.getDescription(), e) not in morphCacheDB.cache]
+        fields = list(set(fields))
         # fields = fields[:100]
         def chunks(l, n):
             """Yield successive n-sized chunks from l."""
@@ -104,7 +105,7 @@ def mkAllDb( allDb=None ):
             morphCacheDB.cache.update(new_cache)
             morphCacheDB.save()
         
-    print("Done bulking")
+    print("Done bulking", N_notes)
         
     for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes' ) ):
         if i % 500 == 0:    mw.progress.update( value=i )
@@ -205,8 +206,7 @@ def updateNotes( allDb ):
         seenDb.save( cfg1('path_seen') )
         knownDb.save( cfg1('path_known') )
         matureDb.save( cfg1('path_mature') )
-        if morphCacheDB:
-            morphCacheDB.save()
+        getMorphCacheDB().save()
     
     mw.progress.update( label='Updating notes' )
     for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes' ) ):
