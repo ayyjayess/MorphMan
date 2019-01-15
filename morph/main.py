@@ -2,7 +2,7 @@
 import time
 
 from anki.utils import splitFields, joinFields, stripHTML, intTime, fieldChecksum
-from .morphemes import MorphDb, AnkiDeck, getMorphemes, getMorphCacheDB
+from .morphemes import MorphDb, AnkiDeck, getMorphemes, getMorphCacheDB, Morpheme
 from .morphemizer import getAllMorphemizers, getMorphemizerByName
 from . import stats
 from .util import printf, mw, cfg, cfg1, partial, errorMsg, infoMsg, jcfg, jcfg2, getFilter
@@ -52,7 +52,10 @@ def setField( mid, fs, k, v ): # nop if field DNE
 def mkAllDb( allDb=None ):
     from . import config; importlib.reload(config)
     t_0, db, TAG = time.time(), mw.col.db, mw.col.tags
-    N_notes = db.scalar( 'select count() from notes' )
+    # TODO search for unsuspended cards rather than looking in tags
+    # This would be more expected behaviour.
+    # Unfortuantly, notes aren't suspended => cards are suspended
+    N_notes = db.scalar( 'select count() from notes where tags like "% morphman %"' )
     N_enabled_notes = 0 # for providing an error message if there is no note that is used for processing
     mw.progress.start( label='Prep work for all.db creation', max=N_notes, immediate=True )
 
@@ -67,7 +70,7 @@ def mkAllDb( allDb=None ):
     for morphemizer_name in bulkMorphemizers:
         fields = []
         morphemizer = getMorphemizerByName(morphemizer_name)
-        for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes' ) ):
+        for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes where tags like "% morphman %"' ) ):
             if i % 500 == 0:    mw.progress.update( value=i )
             note = mw.col.getNote(nid)
             notecfg = getFilter(note)
@@ -107,7 +110,7 @@ def mkAllDb( allDb=None ):
         
     print("Done bulking", N_notes)
         
-    for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes' ) ):
+    for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes where tags like "% morphman %"' ) ):
         if i % 500 == 0:    mw.progress.update( value=i )
         C = partial( cfg, mid, None )
 
@@ -183,7 +186,7 @@ def filterDbByMat( db, mat ):
 def updateNotes( allDb ):
     t_0, now, db, TAG   = time.time(), intTime(), mw.col.db, mw.col.tags
     ds, nid2mmi         = [], {}
-    N_notes             = db.scalar( 'select count() from notes' )
+    N_notes             = db.scalar( 'select count() from notes where tags like "% morphman %"' )
     mw.progress.start( label='Updating data', max=N_notes, immediate=True )
     fidDb   = allDb.fidDb()
     locDb   = allDb.locDb( recalc=False ) # fidDb() already forces locDb recalc
@@ -209,7 +212,7 @@ def updateNotes( allDb ):
         getMorphCacheDB().save()
     
     mw.progress.update( label='Updating notes' )
-    for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes' ) ):
+    for i,( nid, mid, flds, guid, tags ) in enumerate( db.execute( 'select id, mid, flds, guid, tags from notes where tags like "% morphman %"' ) ):
         if i % 500 == 0:    mw.progress.update( value=i )
         C = partial( cfg, mid, None )
 
@@ -243,7 +246,33 @@ def updateNotes( allDb ):
             # average frequency of unknowns (ie. how common the word is within your collection)
         F_k = 0
         for focusMorph in unknowns: # focusMorph used outside loop
-            F_k += allDb.frequency(focusMorph)
+            F_kt = allDb.frequency(focusMorph)
+            depends = {
+                "VVFIN" : "VVINF",	#	finites Verb, voll 	[du] gehst, [wir] kommen [an]
+                "VVIMP" : "VVINF",	#	Imperativ, voll 	komm [!]
+                # "VVINF" : "VVINF",	#	Infinitiv, voll 	gehen, ankommen
+                "VVIZU" : "VVINF",	#	Infinitiv mit ``zu'', voll 	anzukommen, loszulassen
+                "VVPP"  : "VVINF",	#	Partizip Perfekt, voll 	gegangen, angekommen
+
+                "VAFIN" : "VAINF",	#	finites Verb, aux 	[du] bist, [wir] werden
+                "VAIMP" : "VAINF",	#	Imperativ, aux 	sei [ruhig !]
+                # "VAINF" : "VAINF",	#	Infinitiv, aux 	werden, sein
+                "VAPP"  : "VAINF",	#	Partizip Perfekt, aux 	gewesen
+
+                "VMFIN" : "VMINF",	#	finites Verb, modal 	dürfen
+                # "VMINF" : "VMINF",	#	Infinitiv, modal 	wollen
+                "VMPP"  : "VMINF",	#	Partizip Perfekt, modal 	gekonnt, [er hat gehen] können
+            }
+            if focusMorph.subPos in depends and depends[focusMorph.subPos] != focusMorph.subPos:
+                baseMorph = Morpheme(focusMorph.base, focusMorph.inflected, focusMorph.pos, depends[focusMorph.subPos], focusMorph.read)
+                if baseMorph in allDb.db and baseMorph not in knownDb.db:
+                    F_kt = max(0, F_kt - (allDb.frequency(baseMorph) * (1 - max(min(allDb.maturity(baseMorph) / cfg1('threshold_mature'), 1), 0))))
+                    
+            if ( focusMorph.base != focusMorph.inflected):
+                baseMorph = Morpheme(focusMorph.inflected, focusMorph.inflected, focusMorph.pos, focusMorph.subPos, focusMorph.inflected)
+                if baseMorph in allDb.db and baseMorph not in knownDb.db:
+                    F_kt = max(0, F_kt - (allDb.frequency(baseMorph) * (1 - max(min(allDb.maturity(baseMorph) / cfg1('threshold_mature'), 1), 0))))
+            F_k += F_kt
         F_k_avg = F_k // N_k if N_k > 0 else F_k
         usefulness = F_k_avg
 

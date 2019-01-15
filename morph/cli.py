@@ -8,13 +8,8 @@ import os.path
 import signal
 import sys
 
-<<<<<<< HEAD
-from morph.morphemes import MorphDb, Morpheme
-from morph.morphemizer import SpaceMorphemizer, MecabMorphemizer, CjkCharMorphemizer
-=======
-from .morphemes import MorphDb
-from .morphemizer import SpaceMorphemizer, MecabMorphemizer, CjkCharMorphemizer
->>>>>>> 21/master
+from .morphemes import MorphDb, Morpheme
+from .morphemizer import SpaceMorphemizer, SpacyMorphemizer, MecabMorphemizer, CjkCharMorphemizer
 import morph
 
 
@@ -102,6 +97,7 @@ def parse_morpheme(morpheme_str):
 
 MIZERS = {
     'space': SpaceMorphemizer(),
+    'spacy': SpacyMorphemizer(),
     'mecab': MecabMorphemizer(),
     'cjkchar': CjkCharMorphemizer(),
 }
@@ -111,17 +107,12 @@ def cmd_dump(args):
     db_name = args.name
     inc_freq = bool(args.freq)
 
-<<<<<<< HEAD
-    db = load_db(db_name)
-    for m in db.db.keys():
-=======
     path = db_path(db_name)
     if not os.access(path, os.R_OK):
         die('can\'t read db file: %s' % (path,))
     db = MorphDb(path)
 
     for m in list(db.db.keys()):
->>>>>>> 21/master
         m_formatted = m.show().encode('utf-8')
         if inc_freq:
             print('%d\t%s' % (db.frequency(m), m_formatted))
@@ -279,7 +270,6 @@ def main():
                         description='Count all morphemes in the given files and emit a frequency table.')
     p_count.set_defaults(action=cmd_count)
     p_count.add_argument('files', nargs='*', metavar='FILE', help='input files of text to morphemize')
-<<<<<<< HEAD
     add_mizer(p_count)
 
     p_next = subparsers.add_parser('next', help='find next notes to study from a corpus')
@@ -332,12 +322,6 @@ to reflect the results in all.db, known.db, and card ordering.
                              help='scale factor to multiply given frequencies by')
     p_sync_freq.add_argument('--threshold', type=int, default=10, metavar='N',
                              help='minimum (weighted) frequency to include (default: 10)')
-=======
-    p_count.add_argument('--mizer', default='mecab', choices=list(MIZERS.keys()),
-                         metavar='NAME',
-                         help='how to split morphemes (%s) (default %s)'
-                              % (', '.join(list(MIZERS.keys())), 'mecab'))
->>>>>>> 21/master
 
     args = parser.parse_args()
     global CLI_PROFILE_PATH

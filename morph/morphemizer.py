@@ -197,17 +197,18 @@ class SpacyMorphemizer(Morphemizer):
     '''
     def __init__(self):
         self.n = 0
-        import spacy
         self._nlp = None
         
     def get_nlp(self):
         if not self._nlp:
+            import spacy
             self._nlp = spacy.load('de_core_news_sm', disable=['parser', 'ner'])
         return self._nlp
         
     def spacyDocToMorphemes(self, doc):
         # "base     infl    pos     subPos    read"
-        return [Morpheme(w.lemma_.lower(), w.orth_.lower(), w.pos_, w.tag_, w.orth_.lower()) for w in doc 
+        # 4col: m[0] m[2] m[3] m[4]
+        return [Morpheme(w.orth_.lower(), w.lemma_.lower(), w.pos_, w.tag_, w.lemma_.lower()) for w in doc 
                  if (not w.pos_ in
                     [
                         # http://universaldependencies.org/en/pos/index.html

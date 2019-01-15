@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import codecs, pickle as pickle, gzip, os, subprocess, re
 from .util_external import memoize
+import math
 
 # need some fallbacks if not running from anki and thus morph.util isn't available
 try:
@@ -116,11 +117,12 @@ def getMorphemes(morphemizer, expression, note_tags=None):
             break
     else:
         ms = morphemizer.getMorphemesFromExpr(expression)
-    morphCacheDB.cache[morph_key] = ms
-    global n
-    n += 1
-    if n % 100 == 0:
-        morphCacheDB.save()
+    if ms is not None:
+        morphCacheDB.cache[morph_key] = ms
+        global n
+        n += 1
+        if n % 100 == 0:
+            morphCacheDB.save()
     return ms
 
 
@@ -284,6 +286,10 @@ class MorphDb:
     # Analysis (local)
     def frequency( self, m ): # Morpheme -> Int
         return sum(getattr(loc, 'weight', 1) for loc in self.db[m])
+    
+    # Analysis (local)
+    def maturity( self, m ): # Morpheme -> Int
+        return math.sqrt(sum(getattr(loc, 'maturity', 1) ** 2 for loc in self.db[m]))
 
     # Analysis (global)
     def locDb( self, recalc=True ): # Maybe Bool -> m Map Location {Morpheme}
